@@ -35,11 +35,9 @@ type Tank struct {
 func (motor *Motor) adjust(val int16) {
 	var ain1, ain2 uint8
 	if val < 0 {
-		ain1 = 0
-		ain2 = 1
+		ain1, ain2 = 0, 1
 	} else {
-		ain1 = 1
-		ain2 = 0
+		ain1, ain2 = 1, 0
 	}
 	posVal := absoluteValue(val) * (255 / 100)
 	motor.Beagle.PwmWrite(motor.PwmPin, uint8(posVal))
