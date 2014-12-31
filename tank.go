@@ -92,6 +92,14 @@ func (tank *Tank) processDrive(speed int16, direction int16) {
 	tank.adjustMotors()
 }
 
+func (tank *Tank) processTurretMove(direction string) {
+	fmt.Printf("MOVE: %s\n", direction)
+}
+
+func (tank *Tank) processTurretFire() {
+	fmt.Printf("FIRE!!!\n")
+}
+
 func (tank *Tank) adjustMotors() {
 	fmt.Printf("AdjustMotors: Left = %d, Right = %d\n", tank.CurrentLeft, tank.CurrentRight)
 	tank.LeftMotor.adjust(tank.CurrentLeft)

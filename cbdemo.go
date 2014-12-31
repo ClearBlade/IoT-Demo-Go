@@ -103,11 +103,17 @@ type TankDriveMsg struct {
 	Direction    int16
 }
 
-// Dev/Tank/<TankId>/Turret
-type TankTurretMsg struct {
+// Dev/Tank/<TankId>/TurretMove
+type TankTurretMoveMsg struct {
 	ControllerId string
 	TankId       string // Also in message path
-	/* ??? */
+	Direction    string
+}
+
+// Dev/Tank/<TankId>/TurretFire
+type TankTurretFireMsg struct {
+	ControllerId string
+	TankId       string // Also in message path
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -123,7 +129,8 @@ type ClearBladeInfo struct {
 	AskPairChannel         <-chan *mqtt.Publish
 	UnpairChannel          <-chan *mqtt.Publish
 	DriveChannel           <-chan *mqtt.Publish
-	TurretChannel          <-chan *mqtt.Publish
+	TurretMoveChannel      <-chan *mqtt.Publish
+	TurretFireChannel      <-chan *mqtt.Publish
 }
 
 const (
@@ -166,6 +173,7 @@ func (info ClearBladeInfo) publishMsg(topic string, data interface{}) {
 	topicStr := fmt.Sprintf(topic, info.UniqueId)
 	fmt.Printf("Publish: %s, Msg: %s\n", topicStr, string(bytes))
 	err = info.UserClient.Publish(topicStr, bytes, cb.QOS_AtMostOnce)
+	checkError(err)
 }
 
 func (info ClearBladeInfo) setUniqueId() string {
@@ -221,10 +229,18 @@ func (info ClearBladeInfo) processDrive(msg *mqtt.Publish) {
 	info.Tank.processDrive(tankDriveMsg.Speed, tankDriveMsg.Direction)
 }
 
-func (info ClearBladeInfo) processTurret(msg *mqtt.Publish) {
-	var tankTurretMsg TankTurretMsg
-	info.unpack(msg, &tankTurretMsg)
-	fmt.Printf("Got Turret: %+v\n", tankTurretMsg)
+func (info ClearBladeInfo) processTurretMove(msg *mqtt.Publish) {
+	var tankTurretMoveMsg TankTurretMoveMsg
+	info.unpack(msg, &tankTurretMoveMsg)
+	fmt.Printf("Got Turret Move: %+v\n", tankTurretMoveMsg)
+	info.Tank.processTurretMove(tankTurretMoveMsg.Direction)
+}
+
+func (info ClearBladeInfo) processTurretFire(msg *mqtt.Publish) {
+	var tankTurretFireMsg TankTurretFireMsg
+	info.unpack(msg, &tankTurretFireMsg)
+	fmt.Printf("Got Turret Fire: %+v\n", tankTurretFireMsg)
+	info.Tank.processTurretFire()
 }
 
 func (info ClearBladeInfo) listenAndProcessMessages() {
@@ -234,21 +250,60 @@ func (info ClearBladeInfo) listenAndProcessMessages() {
 	for {
 		fmt.Printf("Going into select...\n")
 		select {
-		case askStateMsg := <-info.AskStateChannel:
-			info.processAskState(askStateMsg)
-		case controllerStateMsg := <-info.ControllerStateChannel:
-			info.processControllerState(controllerStateMsg)
-		case askPairMsg := <-info.AskPairChannel:
-			info.processAskPair(askPairMsg)
-		case unpairMsg := <-info.UnpairChannel:
-			info.processUnpair(unpairMsg)
-		case driveMsg := <-info.DriveChannel:
-			info.processDrive(driveMsg)
-		case turretMsg := <-info.TurretChannel:
-			info.processTurret(turretMsg)
+		case askStateMsg, more := <-info.AskStateChannel:
+			if more {
+				info.processAskState(askStateMsg)
+			} else {
+				fmt.Println("askState Channel closed")
+				return
+			}
+		case controllerStateMsg, more := <-info.ControllerStateChannel:
+			if more {
+				info.processControllerState(controllerStateMsg)
+			} else {
+				fmt.Println("controllerState Channel closed")
+				return
+			}
+		case askPairMsg, more := <-info.AskPairChannel:
+			if more {
+				info.processAskPair(askPairMsg)
+			} else {
+				fmt.Println("askPair Channel closed")
+				return
+			}
+		case unpairMsg, more := <-info.UnpairChannel:
+			if more {
+				info.processUnpair(unpairMsg)
+			} else {
+				fmt.Println("unpair Channel closed")
+				return
+			}
+		case driveMsg, more := <-info.DriveChannel:
+			if more {
+				info.processDrive(driveMsg)
+			} else {
+				fmt.Println("drive Channel closed")
+				return
+			}
+		case turretMoveMsg, more := <-info.TurretMoveChannel:
+			if more {
+				info.processTurretMove(turretMoveMsg)
+			} else {
+				fmt.Println("turretMove Channel closed")
+				return
+			}
+		case turretFireMsg, more := <-info.TurretFireChannel:
+			if more {
+				info.processTurretFire(turretFireMsg)
+			} else {
+				fmt.Println("turretFire Channel closed")
+				return
+			}
 		case _ = <-signalChan:
 			// cleanup
-			fmt.Println("GOT SIGNAL!\n")
+			//  Zero out drive motors
+			info.Tank.processDrive(0, 0)
+			//  Tell the world we're done
 			info.publishMsg(string(TankStateMsgTopic),
 				TankStateMsg{info.UniqueId, TankDown})
 			info.UserClient.Logout()
@@ -305,8 +360,13 @@ func (ClearBladeInfo) initialize(info *ClearBladeInfo) {
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
-	info.TurretChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/Turret", info.UniqueId),
+	info.TurretMoveChannel, e = info.UserClient.Subscribe(
+		fmt.Sprintf("Dev/Tank/%s/TurretMove", info.UniqueId),
+		cb.QOS_AtMostOnce,
+	)
+	checkError(e)
+	info.TurretFireChannel, e = info.UserClient.Subscribe(
+		fmt.Sprintf("Dev/Tank/%s/TurretFire", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
