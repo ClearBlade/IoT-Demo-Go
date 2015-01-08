@@ -5,7 +5,7 @@ import (
 	//"github.com/hybridgroup/gobot"
 	cb "github.com/clearblade/Go-SDK"
 	mqtt "github.com/clearblade/mqtt_parsing"
-	bb "github.com/hybridgroup/gobot/platforms/beaglebone"
+	//bb "github.com/hybridgroup/gobot/platforms/beaglebone"
 	//"github.com/hybridgroup/gobot/platforms/gpio"
 	//"net/http"
 	//"strconv"
@@ -45,8 +45,9 @@ const (
 type MsgTopic string
 
 const (
-	TankStateMsgTopic MsgTopic = "Dev/Tank/%s/State"
-	TankPairMsgTopic  MsgTopic = "Dev/Tank/%s/Pair"
+	TankStateMsgTopic   MsgTopic = "Dev/Tank/%s/State"
+	TankPairMsgTopic    MsgTopic = "Dev/Tank/%s/Pair"
+	TankSensorsMsgTopic MsgTopic = "Dev/Tank/%s/Sensors"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -124,6 +125,8 @@ type ClearBladeInfo struct {
 	PairedMaster           string
 	State                  TankState
 	Tank                   Tank
+	SensorMsg              TankSensorReadingsMsg
+	Sensors                *Sensors
 	AskStateChannel        <-chan *mqtt.Publish
 	ControllerStateChannel <-chan *mqtt.Publish
 	AskPairChannel         <-chan *mqtt.Publish
@@ -214,6 +217,9 @@ func (info ClearBladeInfo) processAskPair(msg *mqtt.Publish) {
 	}
 	info.publishMsg(string(TankPairMsgTopic),
 		TankPairMsg{info.UniqueId, tankAskPairMsg.ControllerId, pairResponse})
+	if pairResponse == PairYes {
+		//info.resetSensorData()
+	}
 }
 
 func (info ClearBladeInfo) processUnpair(msg *mqtt.Publish) {
@@ -243,7 +249,7 @@ func (info ClearBladeInfo) processTurretFire(msg *mqtt.Publish) {
 	info.Tank.processTurretFire()
 }
 
-func (info ClearBladeInfo) listenAndProcessMessages() {
+func (info *ClearBladeInfo) listenAndProcessMessages() {
 	//  Setup channel for catching sigint
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
@@ -299,6 +305,18 @@ func (info ClearBladeInfo) listenAndProcessMessages() {
 				fmt.Println("turretFire Channel closed")
 				return
 			}
+		case sdkError, more := <-info.UserClient.MQTTClient.ClientErrorBuffer:
+			if more {
+				fmt.Println("Got error from error channel:", sdkError)
+				//  Try to reinit MQTT right here...
+				if !info.initMQTT() {
+					fmt.Println("Reinitializing of MQTT failed. Exiting...")
+					os.Exit(1)
+				}
+			} else {
+				fmt.Println("Got eof on error channel")
+				return
+			}
 		case _ = <-signalChan:
 			// cleanup
 			//  Zero out drive motors
@@ -312,29 +330,17 @@ func (info ClearBladeInfo) listenAndProcessMessages() {
 	}
 }
 
-func (ClearBladeInfo) initialize(info *ClearBladeInfo) {
-
-	info.UniqueId = info.setUniqueId()
-	fmt.Printf("UniqueId is: %s\n", info.UniqueId)
-
-	info.Tank.initTank()
-	//
-	// Get all authorized and connected to clearblade and mqtt
-	//
-	info.UserClient = cb.NewUserClient(SYSTEM_KEY, SYSTEM_SECRET, TANK_USERNAME, TANK_PASSWORD)
-	authErr := info.UserClient.Authenticate()
-	checkError(authErr)
-	if authErr != nil {
-		fmt.Printf("Error Authing MQTT!: %v\n", authErr)
-	}
+func (info *ClearBladeInfo) initMQTT() bool {
 	initErr := info.UserClient.InitializeMQTT("WeBeTanks", "Ignoring", 30)
 	if initErr != nil {
 		fmt.Printf("Error Initing MQTT!: %v\n", initErr)
+		return false
 	}
 	lastWill := info.lastWillPacket()
 	connErr := info.UserClient.ConnectMQTT(nil, &lastWill)
 	if connErr != nil {
 		fmt.Printf("Error Connecting MQTT!: %v\n", connErr)
+		return false
 	}
 
 	//
@@ -372,6 +378,31 @@ func (ClearBladeInfo) initialize(info *ClearBladeInfo) {
 	checkError(e)
 
 	//
+	return true
+}
+
+func (info *ClearBladeInfo) initialize() {
+
+	info.UniqueId = info.setUniqueId()
+	fmt.Printf("UniqueId is: %s\n", info.UniqueId)
+
+	info.Sensors = NewSensors(info)
+	info.Tank.initTank(info.Sensors)
+	//
+	// Get all authorized and connected to clearblade and mqtt
+	//
+	info.UserClient = cb.NewUserClient(SYSTEM_KEY, SYSTEM_SECRET, TANK_USERNAME, TANK_PASSWORD)
+	authErr := info.UserClient.Authenticate()
+	checkError(authErr)
+	if authErr != nil {
+		fmt.Printf("Error Authing MQTT!: %v\n", authErr)
+	}
+
+	if !info.initMQTT() {
+		os.Exit(1)
+	}
+
+	//
 	//  Send initial State (Up) message
 	//
 	info.State = TankUp
@@ -381,13 +412,15 @@ func (ClearBladeInfo) initialize(info *ClearBladeInfo) {
 func main() {
 
 	//  Init and connect to the beaglebone device.
-	var info ClearBladeInfo
-	beagleboneAdaptor := bb.NewBeagleboneAdaptor("beaglebone")
-	if !beagleboneAdaptor.Connect() {
-		fmt.Println("Could not start adaptor")
-	}
+	info := ClearBladeInfo{}
+	/*
+		beagleboneAdaptor := bb.NewBeagleboneAdaptor("beaglebone")
+		if !beagleboneAdaptor.Connect() {
+			fmt.Println("Could not start adaptor")
+		}
+	*/
 
 	//  Init clearblade and let 'er rip
-	info.initialize(&info)
+	info.initialize()
 	info.listenAndProcessMessages()
 }

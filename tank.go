@@ -30,6 +30,7 @@ type Tank struct {
 	LeftMotor        *Motor
 	RightMotor       *Motor
 	Beagle           *bb.BeagleboneAdaptor
+	Sensors          *Sensors
 }
 
 func (motor *Motor) adjust(val int16) {
@@ -45,7 +46,8 @@ func (motor *Motor) adjust(val int16) {
 	motor.Beagle.DigitalWrite(motor.Ain2Pin, ain2)
 }
 
-func (tank *Tank) initTank() {
+func (tank *Tank) initTank(sensors *Sensors) {
+	tank.Sensors = sensors
 	tank.CurrentSpeed = 0
 	tank.CurrentDirection = 0
 	tank.CurrentLeft = 0
@@ -80,9 +82,11 @@ func adjustToPercentage(val int16) int16 {
 }
 
 func (tank *Tank) convertToLeftAndRight() {
-	tank.CurrentLeft = adjustToPercentage(tank.CurrentSpeed +
-		(tank.directionMultiplier() * tank.CurrentDirection))
-	tank.CurrentRight = adjustToPercentage((2 * tank.CurrentSpeed) - tank.CurrentLeft)
+	tank.CurrentLeft = tank.CurrentSpeed +
+		(tank.directionMultiplier() * tank.CurrentDirection)
+	tank.CurrentRight = (2 * tank.CurrentSpeed) - tank.CurrentLeft
+	tank.CurrentLeft = adjustToPercentage(tank.CurrentLeft)
+	tank.CurrentRight = adjustToPercentage(tank.CurrentRight)
 }
 
 func (tank *Tank) processDrive(speed int16, direction int16) {
@@ -94,14 +98,17 @@ func (tank *Tank) processDrive(speed int16, direction int16) {
 
 func (tank *Tank) processTurretMove(direction string) {
 	fmt.Printf("MOVE: %s\n", direction)
+	// xxxswm todo update the sensors
 }
 
 func (tank *Tank) processTurretFire() {
 	fmt.Printf("FIRE!!!\n")
+	// xxxswm todo update the sensors
 }
 
 func (tank *Tank) adjustMotors() {
 	fmt.Printf("AdjustMotors: Left = %d, Right = %d\n", tank.CurrentLeft, tank.CurrentRight)
 	tank.LeftMotor.adjust(tank.CurrentLeft)
 	tank.RightMotor.adjust(tank.CurrentRight)
+	tank.Sensors.updateLeftRight(tank.CurrentLeft, tank.CurrentRight)
 }
