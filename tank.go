@@ -4,6 +4,7 @@ import (
 	"fmt"
 	bb "github.com/hybridgroup/gobot/platforms/beaglebone"
 	"math"
+	"os/exec"
 )
 
 const (
@@ -33,7 +34,11 @@ type Tank struct {
 	Sensors          *Sensors
 }
 
-func (motor *Motor) adjust(val int16) {
+func setMotor(left, right int16) {
+}
+
+func (motor *Motor) adjust(motorNum string, val int16) {
+	/* this stuff is for when directly talking to the dual h-bridge
 	var ain1, ain2 uint8
 	if val < 0 {
 		ain1, ain2 = 0, 1
@@ -44,6 +49,12 @@ func (motor *Motor) adjust(val int16) {
 	motor.Beagle.PwmWrite(motor.PwmPin, uint8(posVal))
 	motor.Beagle.DigitalWrite(motor.Ain1Pin, ain1)
 	motor.Beagle.DigitalWrite(motor.Ain2Pin, ain2)
+	*/
+
+	/* The following stuff is for the DMCC */
+	bigVal := fmt.Sprintf("%d", val*100)
+	out, err := exec.Command("/root/DMCC_Library/setMotor", "0", motorNum, bigVal).Output()
+	fmt.Printf("Out: %v, Err: %v\n", out, err)
 }
 
 func (tank *Tank) initTank(sensors *Sensors) {
@@ -108,7 +119,7 @@ func (tank *Tank) processTurretFire() {
 
 func (tank *Tank) adjustMotors() {
 	fmt.Printf("AdjustMotors: Left = %d, Right = %d\n", tank.CurrentLeft, tank.CurrentRight)
-	tank.LeftMotor.adjust(tank.CurrentLeft)
-	tank.RightMotor.adjust(tank.CurrentRight)
+	tank.LeftMotor.adjust("1", tank.CurrentLeft)
+	tank.RightMotor.adjust("2", tank.CurrentRight)
 	tank.Sensors.updateLeftRight(tank.CurrentLeft, tank.CurrentRight)
 }

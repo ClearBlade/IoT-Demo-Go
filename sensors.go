@@ -28,7 +28,7 @@ func NewSensors(info *ClearBladeInfo) *Sensors {
 			RightTread:       0,
 			Speed:            0,
 			DirectionFR:      "Forward",
-			DirectionLR:      "None",
+			DirectionLR:      "Straight",
 			TurretHorizontal: 0,
 			TurretVertical:   0,
 			ShotsFired:       0,
@@ -48,7 +48,7 @@ func (sensors *Sensors) updateLeftRight(left, right int16) {
 	sensors.msg.LeftTread = left
 	sensors.msg.RightTread = right
 	sensors.msg.Speed = (left + right) / 2
-	sensors.msg.DirectionLR = "None"
+	sensors.msg.DirectionLR = "Straight"
 	if sensors.msg.Speed >= 0 {
 		sensors.msg.DirectionFR = "Forward"
 		if left > right {
