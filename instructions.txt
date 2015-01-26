@@ -1,0 +1,105 @@
+Startup/Shutdown instructions for Tank V 0.000001 AT THE CLEARBLADE OFFICE ONLY
+
+-------
+Startup
+-------
+
+This assumes the two batteries and the beaglebone (bb) are in the tank.
+
+Inspect wires -- especially on the voltage regulator!
+
+Plug in both batteries -- one that goes to the voltage regulator (breadboard) and
+the one that goes to the Motor Controller's (mc) power port. The mc sits on top of the bb.
+
+Now, power up the bb by pluging the barrel jack coming off of the breadboard into the
+5V port of the bb.
+
+Wait.
+
+Wait. (booting the bb and getting wifi set up takes a while)
+
+Now, from your laptop, make sure you are connected to the wifi network "ClearBlade" -- NOT "ClearBlade_5G"
+
+The ip address of the bb (at ClearBlade) should be 192.168.0.70. from a terminal on your laptop, run:
+    ssh -l root 192.168.0.70 (you won't need a password)
+
+if the above hangs for a long time, interrupt the command and try again. Eventually you should get in.
+if you don't, go to the steps outlined below under "If the bb does not get connected to wifi on startup". When that is successful, continue from here...
+
+When you are logged in, do NOT cd anywhere -- you are in the right directory.
+
+run
+    ./cbdemo
+
+This is the go program that drives the tank. You should see some output about ids, a message published,
+and then a message saying you are going into a select() statement. ERIC -- this is where the debug info
+is scrolled across the screen when the tank is running.
+
+At this point, the tank is ready to go.
+
+Get the ipad and open the "ClearBlade Demo" app. It's on the bottom of the second screen.
+
+The app should start and eventually (at the top of the screen) it should say that it is paired to a tank.
+
+Play with the tank. The screen that has the dual tread controls works best.
+
+See Charlie for instructions on how to run the dashboard.
+
+Have fun. Don't wreck the tank or screw up any of the cords/wires.
+
+--------
+Shutdown
+--------
+
+From your ssh connection (on your laptop) to the bb, do the following:
+    
+    interrupt <Ctrl-C> the cbdemo app. It will send a message or two to the cb platform and shutdown.
+    run "halt; exit". This will start the bb shutdown process and get you out of the shell.
+
+Now, go over to the bb on the tank and wait for the lights on the bb to go out. Sometimes this takes
+a while. NOTE: The light on the mc will still be on -- don't worry about that.
+
+Now, unplug the barrel power connector from the 5V bb jack.
+
+Disconnect (and charge) both batteries. Don't take them out of the tank. Put the tank next to the
+battery chargers.
+
+shutdown and power off the ipad.
+
+Go do something more productive.
+
+----------------------------------------------------
+If the bb does not get connected to wifi on startup:
+----------------------------------------------------
+
+DO NOT shut off the bb or unplug it -- leave it on.
+
+put the tank/bb next to your laptop.
+
+plug in the USB to micro-USB cable from your laptop to the bb
+
+run the following command from a terminal:
+
+ssh -l root 192.168.7.2 (or ssh root@192.168.7.2)
+
+You are now connected to the bb through the usb. Do not cd anywhere.
+
+run the following:
+
+    ifdown wlan0 (ignore the output)
+    ifup wlan0
+
+This is trying to reinitialize wifi. The ifup command may take a while. Eventually it should say
+something about being bound/connected (or something) to the ip addr 192.168.0.70
+
+Once that succeeds, from another shell, run
+    ssh -l root 192.168.0.70
+
+This should succeed. If it doesn't, go have a beer.
+
+Once you're in on the .70 shell, type "exit" from the OTHER Shell -- the .7.2 one. Leave the .70 ssh
+connection open.
+
+unplug the usb connection from the bb.
+
+Continue above where you left off. You're almost there!

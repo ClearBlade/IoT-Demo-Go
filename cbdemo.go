@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 )
 
 type TankState string
@@ -45,9 +46,9 @@ const (
 type MsgTopic string
 
 const (
-	TankStateMsgTopic   MsgTopic = "Dev/Tank/%s/State"
-	TankPairMsgTopic    MsgTopic = "Dev/Tank/%s/Pair"
-	TankSensorsMsgTopic MsgTopic = "Dev/Tank/%s/Sensors"
+	TankStateMsgTopic   MsgTopic = "Tank/%s/State"
+	TankPairMsgTopic    MsgTopic = "Tank/%s/Pair"
+	TankSensorsMsgTopic MsgTopic = "Tank/%s/Sensors"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -55,13 +56,13 @@ const (
 // Messages published by a tank.
 //
 
-//  Dev/Tank/<TankId>/State
+//  Tank/<TankId>/State
 type TankStateMsg struct {
 	TankId string
 	State  TankState
 }
 
-// Dev/Tank/<TankId>/Pair
+// Tank/<TankId>/Pair
 type TankPairMsg struct {
 	TankId       string
 	ControllerId string
@@ -73,30 +74,30 @@ type TankPairMsg struct {
 // Messages subscribed to by a tank.
 //
 
-// Dev/Tank/AskState
+// Tank/AskState
 type TankAskStateMsg struct {
 	ControllerId string // Who's askin'
 }
 
-// Dev/Controller/<ControllerId>/State
+// Controller/<ControllerId>/State
 type ControllerStateMsg struct {
 	ControllerId string // Also in message path
 	State        ControllerState
 }
 
-// Dev/Tank/<TankId>/AskPair
+// Tank/<TankId>/AskPair
 type TankAskPairMsg struct {
 	ControllerId string // Who's askin'
 	TankId       string // Also in message path
 }
 
-// Dev/Tank/<TankId>/Unpair
+// Tank/<TankId>/Unpair
 type TankUnpairMsg struct {
 	ControllerId string
 	TankId       string // Also in message path
 }
 
-//  Dev/Tank/<TankId>/Drive
+//  Tank/<TankId>/Drive
 type TankDriveMsg struct {
 	ControllerId string
 	TankId       string // Also in message path
@@ -104,17 +105,21 @@ type TankDriveMsg struct {
 	Direction    int16
 }
 
-// Dev/Tank/<TankId>/TurretMove
+// Tank/<TankId>/TurretMove
 type TankTurretMoveMsg struct {
 	ControllerId string
 	TankId       string // Also in message path
 	Direction    string
 }
 
-// Dev/Tank/<TankId>/TurretFire
+// Tank/<TankId>/TurretFire
 type TankTurretFireMsg struct {
 	ControllerId string
 	TankId       string // Also in message path
+}
+
+type ControllerHeartbeatMsg struct {
+	ControllerId string // Also in message path
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -134,6 +139,9 @@ type ClearBladeInfo struct {
 	DriveChannel           <-chan *mqtt.Publish
 	TurretMoveChannel      <-chan *mqtt.Publish
 	TurretFireChannel      <-chan *mqtt.Publish
+	HeartbeatChannel       <-chan *mqtt.Publish
+	TickerChannel          <-chan time.Time
+	ControllerChannel      chan bool
 }
 
 const (
@@ -143,7 +151,31 @@ const (
 	TANK_PASSWORD = "IAmATank"
 )
 
-//  GLOBALS
+func (info *ClearBladeInfo) tankMoving() bool {
+	return info.Tank.CurrentLeft != 0 || info.Tank.CurrentRight != 0
+}
+
+func (info *ClearBladeInfo) handleHeartbeat() {
+	seenHeartbeat := true
+	controllerUp := false
+	for {
+		select {
+		case controllerUp = <-info.ControllerChannel:
+			if controllerUp {
+				seenHeartbeat = true
+			}
+		case <-info.HeartbeatChannel:
+			fmt.Println("Controller Heartbeat")
+			seenHeartbeat = true
+		case <-info.TickerChannel:
+			if !seenHeartbeat && info.tankMoving() {
+				fmt.Printf("\nSTOPPING TANK DUE TO WIFI ISSUE\n")
+				info.Tank.processDrive(0, 0)
+			}
+			seenHeartbeat = false
+		}
+	}
+}
 
 func checkError(e error) {
 	if e != nil {
@@ -162,7 +194,7 @@ func (info ClearBladeInfo) lastWillPacket() cb.LastWillPacket {
 	bytes, err := json.Marshal(msg)
 	checkError(err)
 	lastWill := cb.LastWillPacket{
-		fmt.Sprintf("Dev/Tank/%s/State", info.UniqueId),
+		fmt.Sprintf("Tank/%s/State", info.UniqueId),
 		string(bytes),
 		cb.QOS_AtMostOnce,
 		false,
@@ -202,7 +234,16 @@ func (info ClearBladeInfo) processAskState(msg *mqtt.Publish) {
 func (info ClearBladeInfo) processControllerState(msg *mqtt.Publish) {
 	var controllerStateMsg ControllerStateMsg
 	info.unpack(msg, &controllerStateMsg)
-	fmt.Printf("Got ControllerState: %+v\n", controllerStateMsg)
+	fmt.Printf("\n\nGot ControllerState: %+v\n\n", controllerStateMsg)
+	if controllerStateMsg.State == ControllerUp {
+		info.ControllerChannel <- true
+	} else {
+		info.ControllerChannel <- false
+		if controllerStateMsg.ControllerId == info.PairedMaster {
+			info.PairedMaster = ""
+			info.State = TankUp
+		}
+	}
 }
 
 func (info ClearBladeInfo) processAskPair(msg *mqtt.Publish) {
@@ -211,6 +252,7 @@ func (info ClearBladeInfo) processAskPair(msg *mqtt.Publish) {
 	fmt.Printf("Got AskPair: %+v\n", tankAskPairMsg)
 	pairResponse := PairYes
 	if info.State == TankUp {
+		info.PairedMaster = tankAskPairMsg.ControllerId
 		info.State = TankPaired
 	} else {
 		pairResponse = PairNo
@@ -347,37 +389,42 @@ func (info *ClearBladeInfo) initMQTT() bool {
 	//  Setup initial subscriptions
 	//
 	var e error
-	info.AskStateChannel, e = info.UserClient.Subscribe("Dev/Tank/AskState", cb.QOS_AtMostOnce)
+	info.AskStateChannel, e = info.UserClient.Subscribe("Tank/AskState", cb.QOS_AtMostOnce)
 	checkError(e)
-	info.ControllerStateChannel, e = info.UserClient.Subscribe("Dev/Controller/+/State", cb.QOS_AtMostOnce)
+	info.ControllerStateChannel, e = info.UserClient.Subscribe("Controller/SWMIPAD/State", cb.QOS_AtMostOnce)
 	checkError(e)
 	info.AskPairChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/AskPair", info.UniqueId),
+		fmt.Sprintf("Tank/%s/AskPair", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
 	info.UnpairChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/Unpair", info.UniqueId),
+		fmt.Sprintf("Tank/%s/Unpair", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
 	info.DriveChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/Drive", info.UniqueId),
+		fmt.Sprintf("Tank/%s/Drive", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
 	info.TurretMoveChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/TurretMove", info.UniqueId),
+		fmt.Sprintf("Tank/%s/TurretMove", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
 	info.TurretFireChannel, e = info.UserClient.Subscribe(
-		fmt.Sprintf("Dev/Tank/%s/TurretFire", info.UniqueId),
+		fmt.Sprintf("Tank/%s/TurretFire", info.UniqueId),
 		cb.QOS_AtMostOnce,
 	)
 	checkError(e)
+	info.HeartbeatChannel, e = info.UserClient.Subscribe("Controller/SWMIPAD/Heartbeat", cb.QOS_AtMostOnce)
+	checkError(e)
 
-	//
+	info.TickerChannel = time.NewTicker(time.Second * 3).C
+
+	go info.handleHeartbeat()
+
 	return true
 }
 
@@ -385,6 +432,8 @@ func (info *ClearBladeInfo) initialize() {
 
 	info.UniqueId = info.setUniqueId()
 	fmt.Printf("UniqueId is: %s\n", info.UniqueId)
+	info.PairedMaster = ""
+	info.ControllerChannel = make(chan bool)
 
 	info.Sensors = NewSensors(info)
 	info.Tank.initTank(info.Sensors)
