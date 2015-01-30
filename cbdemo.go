@@ -1,17 +1,11 @@
 package main
 
 import (
-	"fmt"
-	//"github.com/hybridgroup/gobot"
-	cb "github.com/clearblade/Go-SDK"
-	mqtt "github.com/clearblade/mqtt_parsing"
-	//bb "github.com/hybridgroup/gobot/platforms/beaglebone"
-	//"github.com/hybridgroup/gobot/platforms/gpio"
-	//"net/http"
-	//"strconv"
-	//"net/url"
 	"encoding/json"
 	"errors"
+	"fmt"
+	cb "github.com/clearblade/Go-SDK"
+	mqtt "github.com/clearblade/mqtt_parsing"
 	"io/ioutil"
 	"os"
 	"os/signal"
